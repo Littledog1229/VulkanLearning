@@ -4,15 +4,28 @@
 #include <GLFW/glfw3.h>
 
 #include <iostream>
+#include <set>
 
 #include "spdlog/spdlog.h"
 
+// Day 1 (1/17/2024)
 // Two and a half hours, 264-284 lines in, and im only halfway done with setup...
 // I still have Presentation, Graphics Pipeline Basics, and Drawing AS MAIN TABS left
 //  . I literally haven't even selected a GPU to do anything with yet!
-
+//
 // For reference on how much different (and harder) this is to OpenGL, here is a link to the HelloTriangle for OpenGL
 // . https://learnopengl.com/code_viewer_gh.php?code=src/1.getting_started/2.2.hello_triangle_indexed/hello_triangle_indexed.cpp
+
+// Day 2 [Part 1] (1/18/2024)
+//  . Start Time:  9:32   AM
+//  . End   Time: 10:29   AM
+//  . Line Count: 415-436 Lines
+//
+// It is now 10:13 AM and I am finished with the Setup part!
+//  . Only 12-13 more sections to go until I can see the triangle!!!!! (I have done 5 so far)
+//
+// The time has advanced to 10:29 AM and I have to prepare and leave for class.
+// . I have completed another section, getting the presentation queue
 
 namespace {
     GLFWwindow* window = nullptr;
@@ -23,6 +36,11 @@ namespace {
     // Vulkan
     VkInstance               vk_instance;
     VkDebugUtilsMessengerEXT vk_debug_messenger;
+    VkSurfaceKHR             vk_surface;
+    VkPhysicalDevice         vk_physical_device = VK_NULL_HANDLE; // Implicitly Destroyed
+    VkDevice                 vk_logical_device;
+    VkQueue                  vk_graphics_queue;
+    VkQueue                  vk_presentation_queue;
 
     std::vector<const char*> validation_layers = {
         "VK_LAYER_KHRONOS_validation"
@@ -36,35 +54,19 @@ namespace {
 #endif
 }
 
+struct QueueFamilyIndices {
+    std::optional<uint32_t> GraphicsFamilyQueue;
+    std::optional<uint32_t> PresentationFamilyQueue;
+
+    [[nodiscard]] bool isComplete() const { return GraphicsFamilyQueue.has_value() && PresentationFamilyQueue.has_value(); }
+};
+
 void initWindow();
 void initVulkan();
 void mainLoop();
 void cleanup();
 
 uint32_t helloTriangle() {
-    // Vulkan make-sure-it-works code
-    /*glfwInit();
-
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Vulkan window", nullptr, nullptr);
-
-    uint32_t extensionCount = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
-
-    std::cout << extensionCount << " extensions supported\n";
-
-    glm::mat4 matrix;
-    glm::vec4 vec;
-    auto test = matrix * vec;
-
-    while(!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-    }
-
-    glfwDestroyWindow(window);
-
-    glfwTerminate();*/
-
     try {
         initWindow();
         initVulkan();
@@ -105,11 +107,16 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     void* pUserData);
 
 // Other Vulkan Stuff
-void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& create_info);
+void               populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& create_info);
+bool               isDeviceSuitable(VkPhysicalDevice);
+QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
 
 // Vulkan Creation
 void createInstance();
 void setupDebugMessenger();
+void createSurface();
+void selectPhysicalDevice();
+void createLogicalDevice();
 
 // Method Implementations
 void initWindow() {
@@ -125,6 +132,9 @@ void initWindow() {
 void initVulkan() {
     createInstance();
     setupDebugMessenger();
+    createSurface();
+    selectPhysicalDevice();
+    createLogicalDevice();
 }
 void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
@@ -136,6 +146,8 @@ void cleanup() {
         destroyDebugUtilsMessengerEXT(vk_instance, vk_debug_messenger, nullptr);
     }
 
+    vkDestroyDevice(vk_logical_device, nullptr);
+    vkDestroySurfaceKHR(vk_instance, vk_surface, nullptr);
     vkDestroyInstance(vk_instance, nullptr);
 
     glfwDestroyWindow(window);
@@ -246,6 +258,62 @@ void setupDebugMessenger() {
         throw std::runtime_error{"Failed to setup debug messenger!"};
 }
 
+void selectPhysicalDevice() {
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(vk_instance, &device_count, nullptr);
+
+    if (device_count == 0)
+        throw std::runtime_error{"Failed to find a GPU with Vulkan support."};
+
+    std::vector<VkPhysicalDevice> devices{device_count};
+    vkEnumeratePhysicalDevices(vk_instance, &device_count, devices.data());
+
+    for (const auto device : devices) {
+        if (isDeviceSuitable(device)) {
+            vk_physical_device = device;
+            break;
+        }
+    }
+
+    if (vk_physical_device == VK_NULL_HANDLE)
+        throw std::runtime_error{"Failed to find a GPU with Suitable Vulkan support."};
+}
+
+// There other approaches to picking the device rather than "is this device suitable", such as:
+// . Using a multimap and giving the available devices a "score" and choosing the highest scoring device.
+// (which can be seen at https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Physical_devices_and_queue_families)
+
+// A bunch of fancy checks can be done in here to make sure this device is capable of doing what I want
+bool isDeviceSuitable(const VkPhysicalDevice device) {
+    // Contains things like:
+    //  . Name
+    //  . Type
+    //  . Supported Vulkan Version
+    VkPhysicalDeviceProperties device_properties;
+    vkGetPhysicalDeviceProperties(device, &device_properties);
+
+    // Queries optional features like:
+    //  . 64-bit floats
+    //  . Multi-viewport rendering
+    //  . Texture compression
+    VkPhysicalDeviceFeatures device_features;
+    vkGetPhysicalDeviceFeatures(device, &device_features);
+
+    // This basically means:
+    //  . The GPU is a dedicated GPU (not an integrated GPU on the CPU [like the one my laptop has])
+    //  . The GPU supports Geometry Shaders
+    // In this situation both are required
+    //return device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && device_features.geometryShader;
+
+    // For now, just accept the first device (I only have one in this laptop anyways)
+    // As stated by the tutorial: "Because we're just starting out, Vulkan support is the only thing we need and therefore we'll settle for just any GPU"
+    //return true;
+
+    // Its now time for QueueFamilies!
+    const QueueFamilyIndices indices = findQueueFamilies(device);
+    return indices.isComplete();
+}
+
 void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& create_info) {
     create_info = {};
     create_info.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -288,4 +356,81 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
         spdlog::error(" . Validation Layer Error: {}", pCallbackData->pMessage);
 
     return VK_FALSE;
+}
+
+QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
+    QueueFamilyIndices indices;
+
+    uint32_t queue_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_count, nullptr);
+
+    std::vector<VkQueueFamilyProperties> queue_properties{queue_count};
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_count, queue_properties.data());
+
+    auto i = 0;
+    for (const auto& [queueFlags, queueCount, timestampValidBits, minImageTransferGranularity] : queue_properties) {
+        if (queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            indices.GraphicsFamilyQueue = i;
+
+        VkBool32 presentation_supported = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vk_surface, &presentation_supported);
+
+        if (presentation_supported)
+            indices.PresentationFamilyQueue = i;
+
+        if (indices.isComplete())
+            break;
+
+        i++;
+    }
+
+    return indices;
+}
+
+void createLogicalDevice() {
+    const QueueFamilyIndices indices = findQueueFamilies(vk_physical_device);
+
+    std::vector<VkDeviceQueueCreateInfo> queue_create_infos{};
+    std::set<uint32_t> unique_queue_families = {indices.GraphicsFamilyQueue.value(), indices.PresentationFamilyQueue.value()};
+
+    float_t queue_priority = 1.0f;
+    for (auto queue_family : unique_queue_families) {
+        VkDeviceQueueCreateInfo queue_create_info{};
+
+        queue_create_info.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queue_create_info.queueFamilyIndex = queue_family;
+        queue_create_info.queueCount       = 1;
+        queue_create_info.pQueuePriorities = &queue_priority;
+
+        queue_create_infos.push_back(queue_create_info);
+    }
+
+    VkPhysicalDeviceFeatures features{};
+
+    VkDeviceCreateInfo device_create_info{};
+
+    device_create_info.sType                 = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_create_info.pQueueCreateInfos     = queue_create_infos.data();
+    device_create_info.queueCreateInfoCount  = static_cast<uint32_t>(queue_create_infos.size());
+    device_create_info.pEnabledFeatures      = &features;
+    device_create_info.enabledExtensionCount = 0;
+
+    // Used in older implementations, they are global now (and most will ignore them)
+    // Just here for legacy compatability reasons
+    if (enable_validation_layers) {
+        device_create_info.enabledLayerCount   = static_cast<uint32_t>(validation_layers.size());
+        device_create_info.ppEnabledLayerNames = validation_layers.data();
+    } else
+        device_create_info.enabledLayerCount = 0;
+
+    if (vkCreateDevice(vk_physical_device, &device_create_info, nullptr, &vk_logical_device) != VK_SUCCESS)
+        throw std::runtime_error{"Failed to create Logical Device!"};
+
+    vkGetDeviceQueue(vk_logical_device, indices.GraphicsFamilyQueue.value(),     0, &vk_graphics_queue);
+    vkGetDeviceQueue(vk_logical_device, indices.PresentationFamilyQueue.value(), 0, &vk_presentation_queue);
+}
+
+void createSurface() {
+    if (glfwCreateWindowSurface(vk_instance, window, nullptr, &vk_surface) != VK_SUCCESS)
+        throw std::runtime_error{"Failed to create window surface!"};
 }
