@@ -81,6 +81,8 @@ namespace {
     VkFormat                 vk_swapchain_image_format;
     VkExtent2D               vk_swapchain_extent;
 
+    bool framebuffer_resized = false;
+
     std::vector<VkFramebuffer> vk_swapchain_framebuffers;
 
     //VkSemaphore image_available_semaphore;
@@ -200,6 +202,9 @@ void createCommandPool();
 void createCommandBuffers();
 void createSyncObjects();
 
+void recreateSwapChain();
+void cleanupSwapChain();
+
 // Utility
 std::vector<char> readFile(const std::string& filepath) {
     std::ifstream filestream(filepath, std::ios::ate | std::ios::binary);
@@ -218,6 +223,8 @@ std::vector<char> readFile(const std::string& filepath) {
     return buffer;
 }
 
+void framebufferResized(GLFWwindow* window, int width, int height);
+
 // Method Implementations
 void initWindow() {
     // Lets just assume everything works with GLFW for now...
@@ -225,9 +232,10 @@ void initWindow() {
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    //glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     window = glfwCreateWindow(width, height, "Hello Triangle - Vulkan", nullptr, nullptr);
+    glfwSetFramebufferSizeCallback(window, framebufferResized);
 }
 void initVulkan() {
     createInstance();
@@ -257,11 +265,7 @@ void cleanup() {
         destroyDebugUtilsMessengerEXT(vk_instance, vk_debug_messenger, nullptr);
     }
 
-    for (const auto framebuffer : vk_swapchain_framebuffers)
-        vkDestroyFramebuffer(vk_logical_device, framebuffer, nullptr);
-
-    for (const auto view : vk_swapchain_image_views)
-        vkDestroyImageView(vk_logical_device, view, nullptr);
+    cleanupSwapChain();
 
     //vkDestroySemaphore(vk_logical_device, image_available_semaphore, nullptr);
     //vkDestroySemaphore(vk_logical_device, render_finished_semaphore, nullptr);
@@ -278,7 +282,6 @@ void cleanup() {
     vkDestroyRenderPass(vk_logical_device, vk_render_pass, nullptr);
     vkDestroyPipeline(vk_logical_device, vk_pipeline, nullptr);
     vkDestroyPipelineLayout(vk_logical_device, vk_pipeline_layout, nullptr);
-    vkDestroySwapchainKHR(vk_logical_device, vk_swapchain, nullptr);
     vkDestroyDevice(vk_logical_device, nullptr);
     vkDestroySurfaceKHR(vk_instance, vk_surface, nullptr);
     vkDestroyInstance(vk_instance, nullptr);
@@ -287,14 +290,28 @@ void cleanup() {
     glfwTerminate();
 }
 
+void framebufferResized(GLFWwindow* window, int width, int height) {
+    framebuffer_resized = true;
+}
+
 void drawFrame() {
     static uint32_t current_frame = 0;
 
     vkWaitForFences(vk_logical_device, 1, &in_flight_fences[current_frame], VK_TRUE, UINT64_MAX);
-    vkResetFences(vk_logical_device, 1, &in_flight_fences[current_frame]);
 
     uint32_t image_index = 0;
-    vkAcquireNextImageKHR(vk_logical_device, vk_swapchain, UINT64_MAX, image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+    VkResult result = vkAcquireNextImageKHR(vk_logical_device, vk_swapchain, UINT64_MAX, image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreateSwapChain();
+        return;
+    }
+
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+        throw std::runtime_error{"Failed to aquire swapchain image!"};
+
+    // This has been moved down here to prevent dealocks for when VK_ERROR_OUT_OF_DATE_KHR occurs
+    vkResetFences(vk_logical_device, 1, &in_flight_fences[current_frame]);
 
     vkResetCommandBuffer(vk_command_buffers[current_frame], 0);
     recordCommandBuffer(vk_command_buffers[current_frame], image_index);
@@ -329,7 +346,13 @@ void drawFrame() {
     present_info.pImageIndices         = &image_index;
     present_info.pResults              = nullptr; // Optional
 
-    vkQueuePresentKHR(vk_graphics_queue, &present_info);
+    result = vkQueuePresentKHR(vk_graphics_queue, &present_info);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebuffer_resized) {
+        framebuffer_resized = false;
+        recreateSwapChain();
+    } else if (result != VK_SUCCESS)
+        throw std::runtime_error{"Failed to present the swapchain image"};
 
     current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -1125,4 +1148,32 @@ void recordCommandBuffer(VkCommandBuffer buffer, uint32_t image_index) {
 
     if (vkEndCommandBuffer(buffer) != VK_SUCCESS)
         throw std::runtime_error{"Failed to record command buffer!"};
+}
+
+void recreateSwapChain() {
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(window, &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(vk_logical_device);
+
+    cleanupSwapChain();
+
+    createSwapChain();
+    createImageViews();
+    createFramebuffers();
+}
+
+void cleanupSwapChain() {
+    for (const auto framebuffer : vk_swapchain_framebuffers)
+        vkDestroyFramebuffer(vk_logical_device, framebuffer, nullptr);
+
+    for (const auto view : vk_swapchain_image_views)
+        vkDestroyImageView(vk_logical_device, view, nullptr);
+
+    vkDestroySwapchainKHR(vk_logical_device, vk_swapchain, nullptr);
 }
