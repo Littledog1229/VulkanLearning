@@ -1,11 +1,16 @@
 #include "HelloTriangle.hpp"
 
 #define GLFW_INCLUDE_VULKAN
+#include <cmath>
 #include <fstream>
 #include <GLFW/glfw3.h>
 
 #include <iostream>
 #include <set>
+#include <cstring>
+
+#include "vec2.hpp"
+#include "vec3.hpp"
 
 #include "spdlog/spdlog.h"
 
@@ -55,6 +60,49 @@
 //  . Countless hours, headaches, and 1102 lines of code later, there is a triangle on the screen!
 // Also side note, CLion Nova is currently taking up 8 GB in Task Manager (so probably more). It has not been restarted since Day 1.
 
+// Some Notes
+//  . It seems that if you wanted to have different vertex types, you must create a new graphics pipeline for them
+
+struct Vertex {
+    glm::vec2 Position;
+    glm::vec3 Color;
+
+    static VkVertexInputBindingDescription getBindingDescription() {
+        VkVertexInputBindingDescription description{};
+
+        description.binding   = 0;
+        description.stride    = sizeof(Vertex);
+        description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // VK_VERTEX_INPUT_RATE_INSTANCE for instanced rendering
+
+        return description;
+    }
+
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 2> descriptions{};
+
+        // Basically:
+        //  . Binding:  Which bound vertex array will the data for this attribute come from
+        //  . Location: Which location (in the shader) is this data bound to
+        //  . Format:   What is the data type (expressed in colors, unforunately) of this component
+        //  . Offset:   What is the offset into the vertex that this data can be found
+
+        // For a list of the Formats, check here for a refresher:
+        //  . https://vulkan-tutorial.com/Vertex_buffers/Vertex_input_description
+
+        descriptions[0].binding  = 0;
+        descriptions[0].location = 0;
+        descriptions[0].format   = VK_FORMAT_R32G32_SFLOAT;
+        descriptions[0].offset   = offsetof(Vertex, Position);
+
+        descriptions[1].binding  = 0;
+        descriptions[1].location = 1;
+        descriptions[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        descriptions[1].offset   = offsetof(Vertex, Color);
+
+        return descriptions;
+    }
+};
+
 namespace {
     GLFWwindow* window = nullptr;
 
@@ -80,6 +128,9 @@ namespace {
     std::vector<VkImageView> vk_swapchain_image_views;
     VkFormat                 vk_swapchain_image_format;
     VkExtent2D               vk_swapchain_extent;
+
+    VkBuffer       vk_vertex_buffer;
+    VkDeviceMemory vk_vertex_memory;
 
     bool framebuffer_resized = false;
 
@@ -110,6 +161,14 @@ namespace {
     const bool enable_validation_layers = true;
 
 #endif
+
+    // I really hate that Y is inverted so that y- is the top of the screen...
+
+    const std::vector<Vertex> vertices = {
+        {{ 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+        {{ 0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
+        {{-0.5f,  0.5f}, {0.0f, 0.0f, 0.0f}}
+    };
 }
 
 struct QueueFamilyIndices {
@@ -187,6 +246,8 @@ VkShaderModule createShaderModule(const std::vector<char>& shader);
 
 void recordCommandBuffer(VkCommandBuffer buffer, uint32_t image_index);
 
+uint32_t findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
+
 // Vulkan Creation
 void createInstance();
 void setupDebugMessenger();
@@ -204,6 +265,8 @@ void createSyncObjects();
 
 void recreateSwapChain();
 void cleanupSwapChain();
+
+void createVertexBuffer();
 
 // Utility
 std::vector<char> readFile(const std::string& filepath) {
@@ -249,6 +312,7 @@ void initVulkan() {
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
+    createVertexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -278,6 +342,9 @@ void cleanup() {
     }
 
     vkDestroyCommandPool(vk_logical_device, vk_command_pool, nullptr);
+
+    vkDestroyBuffer(vk_logical_device, vk_vertex_buffer, nullptr);
+    vkFreeMemory(vk_logical_device, vk_vertex_memory, nullptr);
 
     vkDestroyRenderPass(vk_logical_device, vk_render_pass, nullptr);
     vkDestroyPipeline(vk_logical_device, vk_pipeline, nullptr);
@@ -847,13 +914,16 @@ void createGraphicsPipeline() {
 
     VkPipelineShaderStageCreateInfo shader_stages[] = { vertex_create_info, fragment_create_info };
 
+    auto vertex_binding_description    = Vertex::getBindingDescription();
+    auto vertex_attribute_descriptions = Vertex::getAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertex_input_info{};
 
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertex_input_info.vertexAttributeDescriptionCount = 0;
-    vertex_input_info.pVertexBindingDescriptions      = nullptr; // Optional
-    vertex_input_info.vertexAttributeDescriptionCount = 0;
-    vertex_input_info.pVertexAttributeDescriptions    = nullptr; // Optional
+    vertex_input_info.vertexBindingDescriptionCount   = 1;
+    vertex_input_info.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertex_attribute_descriptions.size());
+    vertex_input_info.pVertexBindingDescriptions      = &vertex_binding_description;
+    vertex_input_info.pVertexAttributeDescriptions    = vertex_attribute_descriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly{};
 
@@ -1141,8 +1211,13 @@ void recordCommandBuffer(VkCommandBuffer buffer, uint32_t image_index) {
 
     vkCmdSetScissor(buffer, 0, 1, &scissor);
 
+    const VkBuffer     vertex_buffers[] { vk_vertex_buffer };
+    const VkDeviceSize offsets[] = {0};
+
+    vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
+
     // THIS IS IT! ITS TIME FOR THE TRIANGLE!!!!!!!
-    vkCmdDraw(buffer, 3, 1, 0, 0);
+    vkCmdDraw(buffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
     vkCmdEndRenderPass(buffer);
 
@@ -1176,4 +1251,52 @@ void cleanupSwapChain() {
         vkDestroyImageView(vk_logical_device, view, nullptr);
 
     vkDestroySwapchainKHR(vk_logical_device, vk_swapchain, nullptr);
+}
+
+void createVertexBuffer() {
+    VkBufferCreateInfo buffer_info{};
+
+    buffer_info.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size        = sizeof(vertices[0]) * vertices.size();
+    buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(vk_logical_device, &buffer_info, nullptr, &vk_vertex_buffer) != VK_SUCCESS)
+        throw std::runtime_error{"Failed to create Vertex Buffer!"};
+
+    VkMemoryRequirements memory_requirements{};
+    vkGetBufferMemoryRequirements(vk_logical_device, vk_vertex_buffer, &memory_requirements);
+
+    VkMemoryAllocateInfo allocate_info{};
+
+    allocate_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocate_info.allocationSize  = memory_requirements.size;
+    allocate_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    if (vkAllocateMemory(vk_logical_device, &allocate_info, nullptr, &vk_vertex_memory) != VK_SUCCESS)
+        throw std::runtime_error{"Failed to allocate Vertex Buffer memory!"};
+
+    vkBindBufferMemory(vk_logical_device, vk_vertex_buffer, vk_vertex_memory, 0);
+
+    // Now we actually upload the vertex data into the array!
+    void* data;
+    vkMapMemory(vk_logical_device, vk_vertex_memory, 0, buffer_info.size, 0, &data);
+
+    memcpy(data, vertices.data(), buffer_info.size);
+
+    vkUnmapMemory(vk_logical_device, vk_vertex_memory);
+
+}
+
+uint32_t findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties physical_memory_properties{};
+    vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &physical_memory_properties);
+
+    for (uint32_t i = 0; i < physical_memory_properties.memoryTypeCount; i++) {
+        if (type_filter & (1 << i) &&
+            (physical_memory_properties.memoryTypes[i].propertyFlags & properties) == properties)
+            return i;
+    }
+
+    throw std::runtime_error{"Failed to find suitable memory type!"};
 }
