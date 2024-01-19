@@ -60,6 +60,10 @@
 //  . Countless hours, headaches, and 1102 lines of code later, there is a triangle on the screen!
 // Also side note, CLion Nova is currently taking up 8 GB in Task Manager (so probably more). It has not been restarted since Day 1.
 
+// Its actually painful to navigate this file
+
+// TODO: Read this at some point: https://developer.nvidia.com/vulkan-memory-management
+
 // Some Notes
 //  . It seems that if you wanted to have different vertex types, you must create a new graphics pipeline for them
 
@@ -131,6 +135,8 @@ namespace {
 
     VkBuffer       vk_vertex_buffer;
     VkDeviceMemory vk_vertex_memory;
+    VkBuffer       vk_index_buffer;
+    VkDeviceMemory vk_index_memory;
 
     bool framebuffer_resized = false;
 
@@ -165,10 +171,13 @@ namespace {
     // I really hate that Y is inverted so that y- is the top of the screen...
 
     const std::vector<Vertex> vertices = {
-        {{ 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-        {{ 0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
-        {{-0.5f,  0.5f}, {0.0f, 0.0f, 0.0f}}
+        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}}
     };
+
+    const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
 }
 
 struct QueueFamilyIndices {
@@ -248,6 +257,9 @@ void recordCommandBuffer(VkCommandBuffer buffer, uint32_t image_index);
 
 uint32_t findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
 
+void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage_flags, VkMemoryPropertyFlags property_flags, VkBuffer& buffer, VkDeviceMemory& memory);
+void copyBuffer(VkBuffer source, VkBuffer destination, VkDeviceSize size);
+
 // Vulkan Creation
 void createInstance();
 void setupDebugMessenger();
@@ -267,6 +279,7 @@ void recreateSwapChain();
 void cleanupSwapChain();
 
 void createVertexBuffer();
+void createIndexBuffer();
 
 // Utility
 std::vector<char> readFile(const std::string& filepath) {
@@ -313,6 +326,7 @@ void initVulkan() {
     createFramebuffers();
     createCommandPool();
     createVertexBuffer();
+    createIndexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -345,6 +359,9 @@ void cleanup() {
 
     vkDestroyBuffer(vk_logical_device, vk_vertex_buffer, nullptr);
     vkFreeMemory(vk_logical_device, vk_vertex_memory, nullptr);
+
+    vkDestroyBuffer(vk_logical_device, vk_index_buffer, nullptr);
+    vkFreeMemory(vk_logical_device, vk_index_memory, nullptr);
 
     vkDestroyRenderPass(vk_logical_device, vk_render_pass, nullptr);
     vkDestroyPipeline(vk_logical_device, vk_pipeline, nullptr);
@@ -1215,9 +1232,10 @@ void recordCommandBuffer(VkCommandBuffer buffer, uint32_t image_index) {
     const VkDeviceSize offsets[] = {0};
 
     vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
+    vkCmdBindIndexBuffer(buffer, vk_index_buffer, 0, VK_INDEX_TYPE_UINT16);
 
-    // THIS IS IT! ITS TIME FOR THE TRIANGLE!!!!!!!
-    vkCmdDraw(buffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+    // THIS IS IT! ITS TIME FOR THE TRIANGLE!!!!!!! [now a rectangle]
+    vkCmdDrawIndexed(buffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
     vkCmdEndRenderPass(buffer);
 
@@ -1254,41 +1272,34 @@ void cleanupSwapChain() {
 }
 
 void createVertexBuffer() {
-    VkBufferCreateInfo buffer_info{};
+    const VkDeviceSize memory_size = sizeof(vertices[0]) * vertices.size();
 
-    buffer_info.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_info.size        = sizeof(vertices[0]) * vertices.size();
-    buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer       staging_buffer;
+    VkDeviceMemory staging_memory;
+    createBuffer(memory_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, staging_buffer, staging_memory);
 
-    if (vkCreateBuffer(vk_logical_device, &buffer_info, nullptr, &vk_vertex_buffer) != VK_SUCCESS)
-        throw std::runtime_error{"Failed to create Vertex Buffer!"};
-
-    VkMemoryRequirements memory_requirements{};
-    vkGetBufferMemoryRequirements(vk_logical_device, vk_vertex_buffer, &memory_requirements);
-
-    VkMemoryAllocateInfo allocate_info{};
-
-    allocate_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocate_info.allocationSize  = memory_requirements.size;
-    allocate_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    if (vkAllocateMemory(vk_logical_device, &allocate_info, nullptr, &vk_vertex_memory) != VK_SUCCESS)
-        throw std::runtime_error{"Failed to allocate Vertex Buffer memory!"};
-
-    vkBindBufferMemory(vk_logical_device, vk_vertex_buffer, vk_vertex_memory, 0);
-
-    // Now we actually upload the vertex data into the array!
     void* data;
-    vkMapMemory(vk_logical_device, vk_vertex_memory, 0, buffer_info.size, 0, &data);
+    vkMapMemory(vk_logical_device, staging_memory, 0, memory_size, 0, &data);
+    memcpy(data, vertices.data(), memory_size);
+    vkUnmapMemory(vk_logical_device, staging_memory);
 
-    memcpy(data, vertices.data(), buffer_info.size);
+    createBuffer(memory_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vk_vertex_buffer, vk_vertex_memory);
 
-    vkUnmapMemory(vk_logical_device, vk_vertex_memory);
+    copyBuffer(staging_buffer, vk_vertex_buffer, memory_size);
 
+    vkDestroyBuffer(vk_logical_device, staging_buffer, nullptr);
+    vkFreeMemory(vk_logical_device, staging_memory, nullptr);
+
+    /*const VkDeviceSize memory_size = sizeof(vertices[0]) * vertices.size();
+    createBuffer(memory_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, vk_vertex_buffer, vk_vertex_memory);
+
+    void* data;
+    vkMapMemory(vk_logical_device, vk_vertex_memory, 0, memory_size, 0, &data);
+    memcpy(data, vertices.data(), memory_size);
+    vkUnmapMemory(vk_logical_device, vk_vertex_memory);*/
 }
 
-uint32_t findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties) {
+uint32_t findMemoryType(const uint32_t type_filter, const VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties physical_memory_properties{};
     vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &physical_memory_properties);
 
@@ -1299,4 +1310,90 @@ uint32_t findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties) 
     }
 
     throw std::runtime_error{"Failed to find suitable memory type!"};
+}
+
+void createBuffer(const VkDeviceSize size, const VkBufferUsageFlags usage_flags, const VkMemoryPropertyFlags property_flags, VkBuffer& buffer, VkDeviceMemory& memory) {
+    VkBufferCreateInfo create_info{};
+
+    create_info.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    create_info.size        = size;
+    create_info.usage       = usage_flags;
+    create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(vk_logical_device, &create_info, nullptr, &buffer) != VK_SUCCESS)
+        throw std::runtime_error{"Failed to create buffer!"};
+
+    VkMemoryRequirements memory_requirements{};
+    vkGetBufferMemoryRequirements(vk_logical_device, buffer, &memory_requirements);
+
+    VkMemoryAllocateInfo allocate_info{};
+
+    allocate_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocate_info.allocationSize  = memory_requirements.size;
+    allocate_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, property_flags);
+
+    if (vkAllocateMemory(vk_logical_device, &allocate_info, nullptr, &memory) != VK_SUCCESS)
+        throw std::runtime_error{"Failed to allocate buffer memory!"};
+
+    vkBindBufferMemory(vk_logical_device, buffer, memory, 0);
+}
+
+void copyBuffer(const VkBuffer source, const VkBuffer destination, const VkDeviceSize size) {
+    VkCommandBufferAllocateInfo allocate_info{};
+
+    allocate_info.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocate_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocate_info.commandPool        = vk_command_pool;
+    allocate_info.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer;
+    vkAllocateCommandBuffers(vk_logical_device, &allocate_info, &command_buffer);
+
+    VkCommandBufferBeginInfo begin_info{};
+
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(command_buffer, &begin_info);
+
+    VkBufferCopy copy_region{};
+
+    copy_region.srcOffset = 0; // Optional
+    copy_region.dstOffset = 0; // Optional
+    copy_region.size      = size;
+
+    vkCmdCopyBuffer(command_buffer, source, destination, 1, &copy_region);
+
+    vkEndCommandBuffer(command_buffer);
+
+    VkSubmitInfo submit_info{};
+
+    submit_info.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers    = &command_buffer;
+
+    vkQueueSubmit(vk_graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(vk_graphics_queue);
+
+    vkFreeCommandBuffers(vk_logical_device, vk_command_pool, 1, &command_buffer);
+}
+
+void createIndexBuffer() {
+    const VkDeviceSize memory_size = sizeof(indices[0]) * indices.size();
+
+    VkBuffer       staging_buffer;
+    VkDeviceMemory staging_memory;
+    createBuffer(memory_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, staging_buffer, staging_memory);
+
+    void* data;
+    vkMapMemory(vk_logical_device, staging_memory, 0, memory_size, 0, &data);
+    memcpy(data, indices.data(), memory_size);
+    vkUnmapMemory(vk_logical_device, staging_memory);
+
+    createBuffer(memory_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vk_index_buffer, vk_index_memory);
+
+    copyBuffer(staging_buffer, vk_index_buffer, memory_size);
+
+    vkDestroyBuffer(vk_logical_device, staging_buffer, nullptr);
+    vkFreeMemory(vk_logical_device, staging_memory, nullptr);
 }
