@@ -22,3 +22,5 @@ target_link_libraries(VulkanLearning glfw)
 target_link_libraries(VulkanLearning glm)
 target_link_libraries(VulkanLearning spdlog)
 target_link_libraries(VulkanLearning ${CMAKE_CURRENT_SOURCE_DIR}/extern/lib/vulkan-1.lib)
+
+file(COPY res DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
