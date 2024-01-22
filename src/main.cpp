@@ -3,6 +3,6 @@
 #include "HelloTriangle.hpp"
 
 int main() {
-    return helloTriangle();
+    return HelloTriangle::helloTriangle();
     return 0;
 }

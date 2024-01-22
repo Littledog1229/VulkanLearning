@@ -11,9 +11,24 @@ add_subdirectory(extern/glm)
 add_subdirectory(extern/glfw)
 add_subdirectory(extern/spdlog)
 
-add_executable(VulkanLearning main.cpp
-        HelloTriangle.cpp
-        HelloTriangle.hpp)
+include_directories(include)
+
+add_executable(VulkanLearning src/main.cpp
+        include/StandardUtils.hpp
+        include/VulkanUtilities/ExtensionUtils.hpp
+        include/VulkanUtilities/DebugUtils.hpp
+        include/VulkanUtilities/ShaderUtils.hpp
+        include/VulkanUtilities/BufferUtils.hpp
+
+        src/StandardUtils.cpp
+        src/VulkanUtilities/ExtensionUtils.cpp
+        src/VulkanUtilities/DebugUtils.cpp
+        src/VulkanUtilities/ShaderUtils.cpp
+        src/VulkanUtilities/BufferUtils.cpp
+
+        src/HelloTriangle.cpp
+        src/HelloTriangle.hpp
+)
 
 target_include_directories(VulkanLearning PUBLIC extern/glfw/include)
 target_include_directories(VulkanLearning PUBLIC extern/glm/glm)

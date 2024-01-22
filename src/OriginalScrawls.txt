@@ -1,0 +1,52 @@
+// Day 1 (1/17/2024)
+// Two and a half hours, 264-284 lines in, and im only halfway done with setup...
+// I still have Presentation, Graphics Pipeline Basics, and Drawing AS MAIN TABS left
+//  . I literally haven't even selected a GPU to do anything with yet!
+//
+// For reference on how much different (and harder) this is to OpenGL, here is a link to the HelloTriangle for OpenGL
+// . https://learnopengl.com/code_viewer_gh.php?code=src/1.getting_started/2.2.hello_triangle_indexed/hello_triangle_indexed.cpp
+
+// Day 2 [Part 1] (1/18/2024)
+//  . Start Time:  9:32   AM
+//  . End   Time: 10:29   AM
+//  . Line Count: 415-436 Lines
+//
+// It is now 10:13 AM and I am finished with the Setup part!
+//  . Only 12-13 more sections to go until I can see the triangle!!!!! (I have done 5 so far)
+//
+// The time has advanced to 10:29 AM and I have to prepare and leave for class.
+// . I have completed another section, getting the presentation queue
+
+// Day 2 [Part 2] (1/18/2024)
+//  . Start Time: 12:46   PM
+//  . End   Time: 05:21   PM
+//  . Line Count: 000-000 Lines
+//
+// Its currently 1:43 PM, towering at around 599 lines of code, and I have finally created the swapchain
+//
+// Its currently 1:56 PM, with 644 liens of code I am finally to the Graphics Pipeline!
+//  . I am going o take a temporary break, be back soon.
+// It is 2:25 PM, I have returned
+//
+// The time is 3:28 PM, coming to around 828 lines of code the fixed-function pipeline has finally been finished!
+//  . Just 6 more sections to go.
+//
+// Its 4:15, and I have 'finished' the Graphics Pipeline
+//  . But it doesn't work :(, time to debug
+// Its now 4:21, and I have fixed it! The Graphics Pipeline has been created!!!
+//  . There are currently around 891 lines of code. Still no triangle
+//
+// Its approaching 5 PM (currently 4:51 PM) and the draw command has been issued. Its still not ready to view yet though
+//  . It currently (at the time of writing this line) can be found at line: 1006
+//  . There are currently around 1012 lines of code.
+//
+// The time is 5:21 PM and IT IS GLORIOUS!
+//  . Countless hours, headaches, and 1102 lines of code later, there is a triangle on the screen!
+// Also side note, CLion Nova is currently taking up 8 GB in Task Manager (so probably more). It has not been restarted since Day 1.
+
+// Its actually painful to navigate this file
+
+// TODO: Read this at some point: https://developer.nvidia.com/vulkan-memory-management
+
+// Some Notes
+//  . It seems that if you wanted to have different vertex types, you must create a new graphics pipeline for them
