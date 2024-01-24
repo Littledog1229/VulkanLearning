@@ -4,10 +4,13 @@
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
-#include "StandardUtils.hpp"
 #include "GLFW/glfw3.h"
 
-#include "glm/glm.hpp"
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 // Initial Learning of Vulkan (Chapter 1)
 
@@ -19,6 +22,12 @@ namespace HelloTriangle {
 
         static VkVertexInputBindingDescription                  getBindingDescription();
         static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions();
+    };
+
+    struct UniformBufferObject {
+        alignas(16) glm::mat4 Model;
+        alignas(16) glm::mat4 View;
+        alignas(16) glm::mat4 Projection;
     };
 
     struct QueueFamilyIndices {
@@ -77,9 +86,13 @@ namespace HelloTriangle {
     inline VkQueue                  vk_presentation_queue;
     inline VkSwapchainKHR           vk_swapchain;
     inline VkRenderPass             vk_render_pass;
+    inline VkDescriptorSetLayout    vk_descriptor_set_layout;
     inline VkPipelineLayout         vk_pipeline_layout;
     inline VkPipeline               vk_pipeline;
     inline VkCommandPool            vk_command_pool;
+
+    inline VkDescriptorPool             vk_descriptor_pool;
+    inline std::vector<VkDescriptorSet> vk_descriptor_sets;
 
     inline std::vector<VkImage>       vk_swapchain_images;
     inline std::vector<VkImageView>   vk_swapchain_image_views;
@@ -97,6 +110,12 @@ namespace HelloTriangle {
     inline VkDeviceMemory vk_vertex_memory;
     inline VkBuffer       vk_index_buffer;
     inline VkDeviceMemory vk_index_memory;
+
+    inline std::vector<VkBuffer>       vk_uniform_buffers;
+    inline std::vector<VkDeviceMemory> vk_uniform_memorys;
+    inline std::vector<void*>          vk_uniform_buffers_mapped;
+
+    inline uint32_t current_frame = 0;
 
     // Entrypoint
     uint32_t helloTriangle();
@@ -120,6 +139,7 @@ namespace HelloTriangle {
     void createSwapChain();
     void createImageViews();
     void createRenderPass();
+    void createDescriptorSetLayout();
     void createGraphicsPipeline();
     void createFramebuffers();
     void createCommandPool();
@@ -131,11 +151,16 @@ namespace HelloTriangle {
 
     void createVertexBuffer();
     void createIndexBuffer();
+    void createUniformBuffers();
+
+    void createDescriptorPool();
+    void createDescriptorSets();
 
     bool                     checkValidationLayerSupport();
     std::vector<const char*> getRequiredExtensions();
 
     void recordCommandBuffer(VkCommandBuffer buffer, uint32_t image_index);
+    void updateUniformBuffer(uint32_t current_image);
 
     VkSurfaceFormatKHR chooseSwapSurfaceFomat(const std::vector<VkSurfaceFormatKHR>& available_formats);
     VkPresentModeKHR   choosePresentMode(const std::vector<VkPresentModeKHR>& available_present_modes);
